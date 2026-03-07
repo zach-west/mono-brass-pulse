@@ -215,8 +215,8 @@ function SpotifyModule() {
           </Button>
         ) : (
           <>
-            <div className="flex items-center gap-2 font-mono text-xs text-green-400">
-              <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <div className="flex items-center gap-2 font-mono text-xs text-primary">
+              <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
               AUTHENTICATED — User token active
             </div>
             <div className="flex gap-2">
