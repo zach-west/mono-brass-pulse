@@ -103,7 +103,7 @@ function SonosModule() {
 
         <div className="flex items-center gap-2 font-mono text-xs">
           {status === "connected" ? (
-            <Wifi className="w-4 h-4 text-green-400" />
+            <Wifi className="w-4 h-4 text-primary" />
           ) : status === "error" ? (
             <WifiOff className="w-4 h-4 text-destructive" />
           ) : (
