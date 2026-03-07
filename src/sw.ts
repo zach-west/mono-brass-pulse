@@ -86,7 +86,7 @@ const proxyRequest = async (request: Request, requestUrl: URL) => {
     const body = method === "POST" ? await request.clone().text() : undefined;
     const headers = cloneHeaders(request.headers, useNoCors);
 
-    await fetch(target, {
+    const response = await fetch(target, {
       method,
       mode: useNoCors ? "no-cors" : "cors",
       credentials: "omit",
@@ -101,15 +101,6 @@ const proxyRequest = async (request: Request, requestUrl: URL) => {
         { status: 202, headers: JSON_HEADERS }
       );
     }
-
-    const response = await fetch(target, {
-      method,
-      mode: "cors",
-      credentials: "omit",
-      cache: "no-store",
-      headers,
-      body,
-    });
 
     const relayHeaders = new Headers(response.headers);
     relayHeaders.set("X-LAN-Proxy", "1");
