@@ -4,6 +4,7 @@ import SystemConsole from "@/components/SystemConsole";
 import SpeakerCard from "@/components/SpeakerCard";
 import { toast } from "@/hooks/use-toast";
 import { Search, Plus, Radio } from "lucide-react";
+import { requestLocalNetworkAccess } from "@/services/permissions";
 
 interface Speaker {
   id: string;
@@ -44,49 +45,24 @@ const Index = () => {
     setPressCount((c) => c + 1);
   }, [pressCount, addLog]);
 
-  const requestPermissions = useCallback(async () => {
-    // Request geolocation as a proxy for local network permission on mobile
-    try {
-      const result = await navigator.geolocation.getCurrentPosition(
-        () => {},
-        () => {},
-        { timeout: 3000 }
-      );
-    } catch {
-      // Permission denied or unavailable — continue anyway
-    }
-
-    // Probe Web Bluetooth for elevated trust
-    if ("bluetooth" in navigator) {
-      try {
-        // @ts-expect-error experimental API
-        await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ["generic_access"] });
-      } catch {
-        // User cancelled or unsupported — expected
-      }
-    }
-  }, []);
-
   const searchForSpeakers = useCallback(async () => {
     setSearching(true);
     addLog("REQUESTING NETWORK PERMISSIONS...");
 
-    await requestPermissions();
+    await requestLocalNetworkAccess();
     addLog("SCANNING LOCAL NETWORK...");
 
-    // Attempt to probe the known Sonos IP
     const knownIp = "192.168.88.3";
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
 
-      const res = await fetch(`http://${knownIp}:1400/xml/device_description.xml`, {
+      await fetch(`http://${knownIp}:1400/xml/device_description.xml`, {
         mode: "no-cors",
         signal: controller.signal,
       });
       clearTimeout(timeout);
 
-      // no-cors gives opaque response — assume device is there if no network error
       const existing = speakers.find((s) => s.ip === knownIp);
       if (!existing) {
         setSpeakers((prev) => [...prev, { id: knownIp, name: "Sonos Beam", ip: knownIp }]);
@@ -95,7 +71,7 @@ const Index = () => {
       } else {
         addLog("DEVICE ALREADY CONNECTED");
       }
-    } catch (err) {
+    } catch {
       addLog("SCAN TIMEOUT — Check WiFi permissions");
       toast({
         title: "No Speakers Found",
@@ -105,7 +81,7 @@ const Index = () => {
     } finally {
       setSearching(false);
     }
-  }, [addLog, requestPermissions, speakers]);
+  }, [addLog, speakers]);
 
   const addManualSpeaker = useCallback(() => {
     const knownIp = "192.168.88.3";
@@ -118,15 +94,12 @@ const Index = () => {
 
   return (
     <div className="min-h-[100dvh] flex flex-col items-center justify-center px-6 gap-10 bg-background py-12">
-      {/* Title */}
       <h1 className="text-sm tracking-[0.4em] uppercase text-muted-foreground font-light">
         Mono
       </h1>
 
-      {/* Brass Button */}
       <BrassButton onPress={handlePress} />
 
-      {/* Connected Speakers Section */}
       <div className="w-full max-w-sm space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs tracking-widest uppercase text-muted-foreground">
@@ -177,7 +150,6 @@ const Index = () => {
         )}
       </div>
 
-      {/* Console */}
       <SystemConsole logs={logs} />
     </div>
   );

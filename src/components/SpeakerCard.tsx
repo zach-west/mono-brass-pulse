@@ -1,7 +1,9 @@
 import { useState, useCallback } from "react";
 import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 import { toast } from "@/hooks/use-toast";
-import { Volume2, VolumeX, Wifi } from "lucide-react";
+import { Volume2, VolumeX, Wifi, Play, Pause } from "lucide-react";
+import * as sonos from "@/services/sonosControl";
 
 interface SpeakerCardProps {
   name: string;
@@ -11,44 +13,34 @@ interface SpeakerCardProps {
 
 const SpeakerCard = ({ name, ip, onLog }: SpeakerCardProps) => {
   const [muted, setMuted] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [volume, setVolume] = useState(30);
   const [loading, setLoading] = useState(false);
 
-  const sendMuteCommand = useCallback(async (desiredMute: boolean) => {
-    setLoading(true);
-    const target = `http://${ip}:1400/MediaRenderer/RenderingControl/Control`;
-    const body = `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:SetMute xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1"><InstanceID>0</InstanceID><Channel>Master</Channel><DesiredMute>${desiredMute ? 1 : 0}</DesiredMute></u:SetMute></s:Body></s:Envelope>`;
-
-    try {
-      await fetch(target, {
-        method: "POST",
-        mode: "no-cors",
-        headers: {
-          "Content-Type": "text/xml; charset=utf-8",
-          SOAPACTION: '"urn:schemas-upnp-org:service:RenderingControl:1#SetMute"',
-        },
-        body,
-      });
-
-      setMuted(desiredMute);
-      onLog(`[MUTE] ${desiredMute ? "ON" : "OFF"} → ${ip}`);
-      toast({
-        title: desiredMute ? "🔇 Muted" : "🔊 Unmuted",
-        description: `Command sent to ${name}`,
-      });
-    } catch (err) {
-      onLog(`[ERROR] Mute failed → ${ip}`);
-      toast({
-        title: "Command Failed",
-        description: "Check WiFi permissions — ensure you're on the same network as the speaker.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [ip, name, onLog]);
+  const exec = useCallback(
+    async (label: string, fn: () => Promise<void>, onSuccess?: () => void) => {
+      setLoading(true);
+      try {
+        await fn();
+        onSuccess?.();
+        onLog(`[${label}] OK → ${ip}`);
+      } catch {
+        onLog(`[ERROR] ${label} failed → ${ip}`);
+        toast({
+          title: "Command Failed",
+          description: "Check WiFi permissions — ensure you're on the same network as the speaker.",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [ip, onLog],
+  );
 
   return (
     <div className="console-border rounded-lg p-4 space-y-3">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
@@ -70,10 +62,52 @@ const SpeakerCard = ({ name, ip, onLog }: SpeakerCardProps) => {
           )}
           <Switch
             checked={muted}
-            onCheckedChange={(checked) => sendMuteCommand(checked)}
+            onCheckedChange={(checked) =>
+              exec(checked ? "MUTE" : "UNMUTE", () => sonos.setMute(ip, checked), () => {
+                setMuted(checked);
+                toast({ title: checked ? "🔇 Muted" : "🔊 Unmuted", description: `Command sent to ${name}` });
+              })
+            }
             disabled={loading}
             aria-label="Quick Mute"
           />
+        </div>
+      </div>
+
+      {/* Transport Controls */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() =>
+            exec(
+              playing ? "PAUSE" : "PLAY",
+              () => (playing ? sonos.pause(ip) : sonos.play(ip)),
+              () => setPlaying(!playing),
+            )
+          }
+          disabled={loading}
+          className="flex items-center justify-center w-8 h-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+          aria-label={playing ? "Pause" : "Play"}
+        >
+          {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+        </button>
+
+        {/* Volume Slider */}
+        <div className="flex-1 flex items-center gap-2">
+          <Volume2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          <Slider
+            value={[volume]}
+            min={0}
+            max={100}
+            step={1}
+            onValueCommit={(val) => {
+              const v = val[0];
+              exec("VOLUME", () => sonos.setVolume(ip, v), () => setVolume(v));
+            }}
+            onValueChange={(val) => setVolume(val[0])}
+            disabled={loading}
+            className="flex-1"
+          />
+          <span className="text-xs text-muted-foreground w-7 text-right font-mono">{volume}</span>
         </div>
       </div>
     </div>
