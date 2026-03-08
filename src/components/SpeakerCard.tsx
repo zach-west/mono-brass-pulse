@@ -4,6 +4,7 @@ import { Slider } from "@/components/ui/slider";
 import { toast } from "@/hooks/use-toast";
 import { Volume2, VolumeX, Wifi, Play, Pause } from "lucide-react";
 import * as sonos from "@/services/sonosControl";
+import { getCommand } from "@/services/vibeApi";
 
 interface SpeakerCardProps {
   name: string;
@@ -63,7 +64,10 @@ const SpeakerCard = ({ name, ip, onLog }: SpeakerCardProps) => {
           <Switch
             checked={muted}
             onCheckedChange={(checked) =>
-              exec(checked ? "MUTE" : "UNMUTE", () => sonos.setMute(ip, checked), () => {
+              exec(checked ? "MUTE" : "UNMUTE", async () => {
+                const cmd = await getCommand(checked ? "mute" : "unmute", ip);
+                await sonos.executeLocalCommand(cmd);
+              }, () => {
                 setMuted(checked);
                 toast({ title: checked ? "🔇 Muted" : "🔊 Unmuted", description: `Command sent to ${name}` });
               })
@@ -80,7 +84,10 @@ const SpeakerCard = ({ name, ip, onLog }: SpeakerCardProps) => {
           onClick={() =>
             exec(
               playing ? "PAUSE" : "PLAY",
-              () => (playing ? sonos.pause(ip) : sonos.play(ip)),
+              async () => {
+                const cmd = await getCommand(playing ? "pause" : "play", ip);
+                await sonos.executeLocalCommand(cmd);
+              },
               () => setPlaying(!playing),
             )
           }

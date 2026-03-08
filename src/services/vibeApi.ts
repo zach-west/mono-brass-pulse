@@ -8,6 +8,44 @@ export interface VibeTrack {
   uri?: string;
 }
 
+export interface LocalCommand {
+  url: string;
+  headers: Record<string, string>;
+  body: string;
+}
+
+export async function getCommand(
+  action: "play" | "pause" | "mute" | "unmute",
+  speakerIp: string,
+): Promise<LocalCommand> {
+  const res = await fetch(`${REPLIT_API_URL}/api/command`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, speakerIp }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as Record<string, unknown>)?.error as string ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<LocalCommand>;
+}
+
+export async function curateVibe(
+  query: string,
+  speakerIp: string,
+): Promise<LocalCommand> {
+  const res = await fetch(`${REPLIT_API_URL}/api/curate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, speakerIp }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as Record<string, unknown>)?.error as string ?? `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<LocalCommand>;
+}
+
 export async function searchVibes(query: string): Promise<VibeTrack[]> {
   const res = await fetch(
     `${REPLIT_API_URL}/api/search?q=${encodeURIComponent(query)}`,

@@ -75,3 +75,18 @@ export async function setAVTransportURI(ip: string, uri: string, metadata = ""):
     `<CurrentURI>${escapedUri}</CurrentURI><CurrentURIMetaData>${escapedMeta}</CurrentURIMetaData>`,
   );
 }
+
+export interface LocalCommand {
+  url: string;
+  headers: Record<string, string>;
+  body: string;
+}
+
+export async function executeLocalCommand(cmd: LocalCommand): Promise<void> {
+  await fetch(cmd.url, {
+    method: "POST",
+    mode: "no-cors",
+    headers: cmd.headers,
+    body: cmd.body,
+  });
+}
