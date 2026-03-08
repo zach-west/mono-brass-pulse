@@ -11,6 +11,11 @@ const config: CapacitorConfig = {
   android: {
     allowMixedContent: true,
   },
+  plugins: {
+    CapacitorUpdater: {
+      autoUpdate: true,
+    },
+  },
 };
 
 export default config;

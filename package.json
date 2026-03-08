@@ -17,6 +17,7 @@
     "@capacitor/cli": "^7.6.0",
     "@capacitor/core": "^8.2.0",
     "@capacitor/geolocation": "^8.1.0",
+    "@capgo/capacitor-updater": "^8.43.9",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "^1.2.11",
     "@radix-ui/react-alert-dialog": "^1.1.14",
