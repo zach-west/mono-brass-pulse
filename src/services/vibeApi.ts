@@ -44,7 +44,7 @@ export interface CurateResponse {
   searchBlocked: boolean;
 }
 
-// Native-aware SOAP/UPnP executor.
+// Native-aware SOAP/UPnP executor — void return (fire and check status only).
 // On Android: CapacitorHttp uses the OS network stack — bypasses CORS + WebView cleartext sandbox.
 // On web/dev: falls back to standard fetch (no sandbox restrictions in browser).
 async function executeLocalCommand(
@@ -85,6 +85,46 @@ async function executeLocalCommand(
       onLog(`${label} REJECTED → ${body.slice(0, 500)}`);
       throw new Error(`Sonos rejected ${label}: HTTP ${res.status}`);
     }
+  }
+}
+
+// SOAP executor that returns the full response body — used for diagnostic probes.
+async function executeLocalCommandGetBody(
+  cmd: LocalCommand,
+  label: string,
+  onLog: (msg: string) => void,
+): Promise<string> {
+  const headers: Record<string, string> = {
+    ...cmd.headers,
+    "Content-Type": 'text/xml; charset="utf-8"',
+  };
+
+  onLog(`${label} → ${cmd.description ?? cmd.url}`);
+
+  if (Capacitor.isNativePlatform()) {
+    const response = await CapacitorHttp.request({
+      method: "POST",
+      url: cmd.url,
+      headers,
+      data: cmd.body,
+      responseType: "text",
+    });
+    const body = typeof response.data === "string" ? response.data : JSON.stringify(response.data);
+    onLog(`${label} ← HTTP ${response.status}`);
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`${label} failed: HTTP ${response.status} — ${body.slice(0, 200)}`);
+    }
+    return body;
+  } else {
+    const res = await fetch(cmd.url, {
+      method: "POST",
+      headers,
+      body: cmd.body,
+    });
+    const body = await res.text();
+    onLog(`${label} ← HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`${label} failed: HTTP ${res.status}`);
+    return body;
   }
 }
 
@@ -140,7 +180,70 @@ function buildStopCmd(ip: string): LocalCommand {
   };
 }
 
+// Builds the ListAvailableServices probe command.
+// MusicServices:1 service — returns all configured music services with their IDs.
+function buildListServicesCmd(ip: string): LocalCommand {
+  const SVC = "urn:schemas-sonos-com:service:MusicServices:1";
+  return {
+    url: `http://${ip}:1400/MusicServices/Control`,
+    headers: {
+      "SOAPACTION": `"${SVC}#ListAvailableServices"`,
+    },
+    body: `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:ListAvailableServices xmlns:u="${SVC}"></u:ListAvailableServices></s:Body></s:Envelope>`,
+    description: "Probe: ListAvailableServices",
+  };
+}
+
+// Diagnostic probe: queries the Sonos device for all configured music services.
+// Logs each service with its Id, Name, and Capabilities — critical for identifying
+// the correct Spotify ServiceId and SA_RINCON string for this specific device.
+// Full raw XML is drained to Brain console for offline analysis.
+// Non-throwing — probe failures never block the main playback chain.
+export async function probeServices(
+  ip: string,
+  onLog: (msg: string) => void,
+): Promise<void> {
+  const probeLogs: string[] = [];
+  const plog = (msg: string) => { probeLogs.push(msg); onLog(msg); };
+
+  try {
+    const xml = await executeLocalCommandGetBody(buildListServicesCmd(ip), "PROBE", plog);
+
+    // Extract individual <Service> blocks from the response
+    const serviceBlocks = xml.match(/<Service>[\s\S]*?<\/Service>/g) ?? [];
+    plog(`PROBE → ${serviceBlocks.length} services configured on device`);
+
+    serviceBlocks.forEach((block) => {
+      const name  = block.match(/<Name>([^<]+)<\/Name>/)?.[1]             ?? "?";
+      const id    = block.match(/<Id>([^<]+)<\/Id>/)?.[1]                 ?? "?";
+      const caps  = block.match(/<Capabilities>([^<]+)<\/Capabilities>/)?.[1] ?? "?";
+      const uri   = block.match(/<SecureUri>([^<]+)<\/SecureUri>/)?.[1]   ??
+                    block.match(/<Uri>([^<]+)<\/Uri>/)?.[1]                ?? "?";
+
+      plog(`  SVC id=${id} name="${name}" caps=${caps}`);
+
+      // Flag any Spotify-looking service — check by name and common IDs
+      const isSpotify = name.toLowerCase().includes("spotify") ||
+                        ["9", "3079", "65031", "2311"].includes(id);
+      if (isSpotify) {
+        plog(`  *** SPOTIFY CANDIDATE: id=${id} name="${name}" uri=${uri} ***`);
+        // Cache for use in LOAD command
+        localStorage.setItem("sonos_spotify_service_id", id);
+      }
+    });
+
+    // Drain full raw XML to Brain console — strip whitespace to keep it one log line
+    drainLog([`[PROBE:SERVICES_XML] ${xml.replace(/\s+/g, " ").slice(0, 4000)}`]);
+  } catch (err) {
+    plog(`PROBE FAILED → ${String(err)}`);
+  }
+
+  // Drain summary logs to Brain console
+  drainLog(probeLogs.map((l) => `[PROBE] ${l}`));
+}
+
 // Full voice-to-music chain:
+// 0. PROBE — ListAvailableServices diagnostic (non-blocking, results in Brain logs)
 // 1. POST /api/curate → gets track list + localCommands SOAP payloads from Brain
 // 2. STOP — resets Sonos transport to clean STOPPED state (fixes stuck-after-error gremlin)
 // 3. LOAD — tries sn=1,2,3 in order; caches the working value in localStorage
@@ -155,6 +258,15 @@ export async function executeVibeChain(
   const logAndCollect = (msg: string) => { chainLogs.push(msg); onLog(msg); };
 
   logAndCollect(`VIBE QUERY → "${query}" | speaker: ${speakerIp}`);
+
+  // Step 0: Diagnostic probe — identifies all music services on device.
+  // Runs every time so Brain drain logs always have fresh service data.
+  // Never throws — probe failure never blocks playback.
+  try {
+    await probeServices(speakerIp, logAndCollect);
+  } catch {
+    logAndCollect("PROBE skipped");
+  }
 
   const res = await fetch(`${REPLIT_API_URL}/api/curate`, {
     method: "POST",
@@ -210,7 +322,7 @@ export async function executeVibeChain(
     }
 
     if (!loadSuccess) {
-      throw new Error("Sonos rejected LOAD for sn=1,2,3 — verify Spotify is linked in Sonos app");
+      throw new Error("Sonos rejected LOAD for sn=1,2,3 — check PROBE logs above for service config");
     }
 
     // Step 3: Play
