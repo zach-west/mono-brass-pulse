@@ -23,6 +23,8 @@ const Index = () => {
   const [testingVibe, setTestingVibe] = useState(false);
   const listenerRef = useRef<{ remove: () => void } | null>(null);
   const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTranscriptRef = useRef("");
 
   const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toLocaleTimeString("en-US", {
@@ -38,6 +40,7 @@ const Index = () => {
     return () => {
       listenerRef.current?.remove();
       if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
   }, []);
 
@@ -65,6 +68,11 @@ const Index = () => {
       clearTimeout(recordingTimeoutRef.current);
       recordingTimeoutRef.current = null;
     }
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    lastTranscriptRef.current = "";
     listenerRef.current?.remove();
     listenerRef.current = null;
     if (Capacitor.isNativePlatform()) {
@@ -89,31 +97,37 @@ const Index = () => {
       await stopRecording();
     }, 12000);
 
-    // partialResults: false → wait for complete utterance before firing
-    // (partialResults: true causes the first partial word to trigger immediately,
-    // cutting the user off mid-sentence)
+    // partialResults: true — partial events fire for each word, which we debounce.
+    // With partialResults: false the plugin only calls onResults() (not onPartialResults()),
+    // so the "partialResults" listener NEVER fires and the UI hangs until the 12s timeout.
+    // The 1-second debounce collects the full sentence before processing it.
     listenerRef.current = await CapSpeechRecognition.addListener(
       "partialResults",
-      async (data: { matches: string[] }) => {
+      (data: { matches: string[] }) => {
         const text = data.matches?.[0];
-        if (!text) {
-          // Empty result — recognition ended with no usable transcription.
-          // Must still reset the UI or it hangs in LISTENING state.
+        if (!text) return;
+
+        // Accumulate the latest (longest) transcript
+        lastTranscriptRef.current = text;
+
+        // Reset the silence timer on every new word
+        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = setTimeout(async () => {
+          debounceTimerRef.current = null;
+          const finalText = lastTranscriptRef.current;
+          if (!finalText) return;
           await stopRecording();
-          addLog("MIC — no speech detected, resetting UI");
-          return;
-        }
-        await stopRecording();
-        addLog(`TRANSCRIPTION → "${text}"`);
-        await runVibeFromText(text);
+          addLog(`TRANSCRIPTION → "${finalText}"`);
+          await runVibeFromText(finalText);
+        }, 1000); // 1s of silence = sentence complete
       },
     );
 
     try {
       await CapSpeechRecognition.start({
         language: "en-US",
-        maxResults: 1,
-        partialResults: false,
+        maxResults: 5,
+        partialResults: true,
         popup: false,
       });
     } catch (err) {
