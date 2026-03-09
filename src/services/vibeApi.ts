@@ -123,11 +123,29 @@ export async function sendVolumeControl(speakerIp: string, volume: number): Prom
   }
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+// Builds a UPnP Stop command for the given speaker IP directly on the Face.
+// Resets the Sonos transport to STOPPED state — must be sent before SetAVTransportURI
+// to clear any error/transitioning state left from a previous failed or interrupted load.
+function buildStopCmd(ip: string): LocalCommand {
+  const AVT = "urn:schemas-upnp-org:service:AVTransport:1";
+  return {
+    url: `http://${ip}:1400/MediaRenderer/AVTransport/Control`,
+    headers: {
+      "SOAPACTION": `"${AVT}#Stop"`,
+    },
+    body: `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:Stop xmlns:u="${AVT}"><InstanceID>0</InstanceID></u:Stop></s:Body></s:Envelope>`,
+    description: "Stop transport (clear state)",
+  };
+}
+
 // Full voice-to-music chain:
-// 1. POST /api/curate → gets track list + localCommands SOAP payloads
-// 2. Fire loadFirstTrack (or fallback playlist) directly to Sonos via native HTTP
-// 3. Fire play command to start playback via native HTTP
-// All log entries are drained to the Brain console for remote debugging.
+// 1. POST /api/curate → gets track list + localCommands SOAP payloads from Brain
+// 2. STOP — resets Sonos transport to clean STOPPED state (fixes stuck-after-error gremlin)
+// 3. LOAD — tries sn=1,2,3 in order; caches the working value in localStorage
+//    so every subsequent call uses the right value immediately without retrying
+// 4. PLAY — starts playback
 export async function executeVibeChain(
   query: string,
   speakerIp: string,
@@ -149,7 +167,8 @@ export async function executeVibeChain(
   const tracks = data.tracks ?? [];
   logAndCollect(`TRACKS → ${tracks.length} verified`);
   tracks.slice(0, 2).forEach((t) => {
-    logAndCollect(`  ♪ ${t.name} — ${t.uri ?? ""}`);
+    const displayName = t.name ?? (t as unknown as Record<string, string>).title ?? "unknown";
+    logAndCollect(`  ♪ ${displayName} — ${t.uri ?? ""}`);
   });
 
   if (data.fallback && tracks.length === 0) {
@@ -159,9 +178,42 @@ export async function executeVibeChain(
   const cmds = data.localCommands;
   if (!cmds) throw new Error("No localCommands in Brain response — check Brain logs");
 
-  const loadCmd = cmds.loadFirstTrack ?? cmds.loadFallbackPlaylist;
+  const baseLoadCmd = cmds.loadFirstTrack ?? cmds.loadFallbackPlaylist;
+
   try {
-    await executeLocalCommand(loadCmd, "LOAD", logAndCollect);
+    // Step 1: Stop — reset transport unconditionally before loading new content
+    await executeLocalCommand(buildStopCmd(speakerIp), "STOP", logAndCollect);
+    await sleep(300);
+
+    // Step 2: Load — try sn values in order; cached winner is tried first
+    // sn is the Sonos Spotify account serial assigned when Spotify was linked in the Sonos app
+    const cachedSn = localStorage.getItem("sonos_spotify_sn");
+    const snOrder = cachedSn
+      ? [Number(cachedSn), ...[1, 2, 3].filter((n) => n !== Number(cachedSn))]
+      : [1, 2, 3];
+
+    let loadSuccess = false;
+    for (const sn of snOrder) {
+      const patchedLoad: LocalCommand = {
+        ...baseLoadCmd,
+        body: baseLoadCmd.body.replace(/sn=\d+/g, `sn=${sn}`),
+        description: `Load track (sn=${sn})`,
+      };
+      try {
+        await executeLocalCommand(patchedLoad, "LOAD", logAndCollect);
+        localStorage.setItem("sonos_spotify_sn", String(sn));
+        loadSuccess = true;
+        break;
+      } catch {
+        logAndCollect(`  sn=${sn} rejected — trying next`);
+      }
+    }
+
+    if (!loadSuccess) {
+      throw new Error("Sonos rejected LOAD for sn=1,2,3 — verify Spotify is linked in Sonos app");
+    }
+
+    // Step 3: Play
     await executeLocalCommand(cmds.play, "PLAY", logAndCollect);
     logAndCollect("PLAYBACK STARTED ✓");
   } finally {
@@ -170,7 +222,7 @@ export async function executeVibeChain(
 }
 
 // Legacy helper (used by SpotifyModule / TestVibeBridge)
-export async function curateVibe(
+export async function getCurateCommand(
   query: string,
   speakerIp: string,
 ): Promise<LocalCommand> {
