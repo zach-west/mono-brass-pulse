@@ -22,6 +22,8 @@ const Index = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [testingVibe, setTestingVibe] = useState(false);
   const listenerRef = useRef<{ remove: () => void } | null>(null);
+  const stateListenerRef = useRef<{ remove: () => void } | null>(null);
+  const resultReceivedRef = useRef(false);
 
   const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toLocaleTimeString("en-US", {
@@ -36,6 +38,7 @@ const Index = () => {
   useEffect(() => {
     return () => {
       listenerRef.current?.remove();
+      stateListenerRef.current?.remove();
     };
   }, []);
 
@@ -61,6 +64,8 @@ const Index = () => {
   const stopRecording = useCallback(async () => {
     listenerRef.current?.remove();
     listenerRef.current = null;
+    stateListenerRef.current?.remove();
+    stateListenerRef.current = null;
     if (Capacitor.isNativePlatform()) {
       try { await SpeechRecognition.stop(); } catch { /* already stopped */ }
     }
@@ -74,26 +79,47 @@ const Index = () => {
       return;
     }
 
+    resultReceivedRef.current = false;
     setIsRecording(true);
     addLog("LISTENING...");
+
+    // Fail-safe: if recognition stops without a result (timeout / error / silence),
+    // reset the UI so the user is never stuck in LISTENING mode.
+    stateListenerRef.current = await SpeechRecognition.addListener(
+      "listeningState",
+      (data: { status: "started" | "stopped" }) => {
+        if (data.status === "stopped" && !resultReceivedRef.current) {
+          addLog("MIC STOPPED — no result, resetting UI");
+          setIsRecording(false);
+          stateListenerRef.current?.remove();
+          stateListenerRef.current = null;
+        }
+      },
+    );
 
     listenerRef.current = await SpeechRecognition.addListener(
       "partialResults",
       async (data: { matches: string[] }) => {
         const text = data.matches?.[0];
         if (!text) return;
+        resultReceivedRef.current = true;
         await stopRecording();
         addLog(`TRANSCRIPTION → "${text}"`);
         await runVibeFromText(text);
       },
     );
 
-    await SpeechRecognition.start({
-      language: "en-US",
-      maxResults: 1,
-      partialResults: true,
-      popup: false,
-    });
+    try {
+      await SpeechRecognition.start({
+        language: "en-US",
+        maxResults: 1,
+        partialResults: true,
+        popup: false,
+      });
+    } catch (err) {
+      addLog(`MIC ERROR → ${String(err)}`);
+      await stopRecording();
+    }
   }, [addLog, stopRecording, runVibeFromText]);
 
   const startWebRecording = useCallback(() => {
