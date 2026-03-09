@@ -194,6 +194,21 @@ function buildListServicesCmd(ip: string): LocalCommand {
   };
 }
 
+// Builds a GetPositionInfo command — reads the current track URI from the transport.
+// If the Sonos was last playing Spotify (e.g. from the native Sonos app), the TrackURI
+// will contain the exact sn= value we need for SetAVTransportURI to succeed.
+function buildGetPositionInfoCmd(ip: string): LocalCommand {
+  const AVT = "urn:schemas-upnp-org:service:AVTransport:1";
+  return {
+    url: `http://${ip}:1400/MediaRenderer/AVTransport/Control`,
+    headers: {
+      "SOAPACTION": `"${AVT}#GetPositionInfo"`,
+    },
+    body: `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:GetPositionInfo xmlns:u="${AVT}"><InstanceID>0</InstanceID></u:GetPositionInfo></s:Body></s:Envelope>`,
+    description: "Probe: GetPositionInfo (read current sn)",
+  };
+}
+
 // Diagnostic probe: queries the Sonos device for all configured music services.
 // Logs each service with its Id, Name, and Capabilities — critical for identifying
 // the correct Spotify ServiceId and SA_RINCON string for this specific device.
@@ -257,6 +272,42 @@ export async function probeServices(
   drainLog(probeLogs.map((l) => `[PROBE] ${l}`));
 }
 
+// Reads the Sonos transport state before we STOP — if Spotify was loaded by the native
+// Sonos app the TrackURI contains the exact sn= value. We parse and cache it so the
+// LOAD command uses the right account serial on the very first attempt.
+export async function probeTransportState(
+  ip: string,
+  onLog: (msg: string) => void,
+): Promise<void> {
+  const tLogs: string[] = [];
+  const tlog = (msg: string) => { tLogs.push(msg); onLog(msg); };
+
+  try {
+    const xml = await executeLocalCommandGetBody(buildGetPositionInfoCmd(ip), "TRANSPORT", tlog);
+
+    // TrackURI may be plain text or entity-encoded inside the envelope
+    const raw = xml.match(/<TrackURI>([^<]*)<\/TrackURI>/)?.[1] ?? "";
+    const uri = raw.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+
+    tlog(`TRANSPORT → URI: ${uri.slice(0, 250) || "(empty)"}`);
+
+    if (uri.includes("x-sonos-spotify")) {
+      const snMatch = uri.match(/[?&]sn=(\d+)/);
+      if (snMatch) {
+        const sn = snMatch[1];
+        tlog(`TRANSPORT → sn=${sn} captured from live transport — caching`);
+        localStorage.setItem("sonos_spotify_sn", sn);
+      }
+    }
+
+    drainLog([`[TRANSPORT:URI] ${uri}`]);
+  } catch (err) {
+    tlog(`TRANSPORT PROBE FAILED → ${String(err)}`);
+  }
+
+  drainLog(tLogs.map((l) => `[TRANSPORT] ${l}`));
+}
+
 // Full voice-to-music chain:
 // 0. PROBE — ListAvailableServices diagnostic (non-blocking, results in Brain logs)
 // 1. POST /api/curate → gets track list + localCommands SOAP payloads from Brain
@@ -307,6 +358,13 @@ export async function executeVibeChain(
 
   const baseLoadCmd = cmds.loadFirstTrack ?? cmds.loadFallbackPlaylist;
 
+  // Step 0b: Read current transport state — captures Spotify sn before we STOP wipes it
+  try {
+    await probeTransportState(speakerIp, logAndCollect);
+  } catch {
+    logAndCollect("TRANSPORT PROBE skipped");
+  }
+
   try {
     // Step 1: Stop — reset transport unconditionally before loading new content
     await executeLocalCommand(buildStopCmd(speakerIp), "STOP", logAndCollect);
@@ -316,8 +374,8 @@ export async function executeVibeChain(
     // sn is the Sonos Spotify account serial assigned when Spotify was linked in the Sonos app
     const cachedSn = localStorage.getItem("sonos_spotify_sn");
     const snOrder = cachedSn
-      ? [Number(cachedSn), ...[1, 2, 3].filter((n) => n !== Number(cachedSn))]
-      : [1, 2, 3];
+      ? [Number(cachedSn), ...[1,2,3,4,5,6,7,8,9,10,11,12].filter((n) => n !== Number(cachedSn))]
+      : [1,2,3,4,5,6,7,8,9,10,11,12];
 
     let loadSuccess = false;
     for (const sn of snOrder) {
@@ -337,7 +395,7 @@ export async function executeVibeChain(
     }
 
     if (!loadSuccess) {
-      throw new Error("Sonos rejected LOAD for sn=1,2,3 — check PROBE logs above for service config");
+      throw new Error("Sonos rejected LOAD for sn=1..12 — check PROBE/TRANSPORT logs; Spotify may need re-linking in Sonos app");
     }
 
     // Step 3: Play
