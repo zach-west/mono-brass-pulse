@@ -1,4 +1,3 @@
-import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import type { LocalCommand } from "./vibeApi";
 
 const RENDERING_CONTROL = "urn:schemas-upnp-org:service:RenderingControl:1";
@@ -8,32 +7,6 @@ function soapEnvelope(serviceType: string, action: string, body: string): string
   return `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:${action} xmlns:u="${serviceType}"><InstanceID>0</InstanceID>${body}</u:${action}></s:Body></s:Envelope>`;
 }
 
-// Native-aware HTTP POST for Sonos UPnP/SOAP.
-// On Android: CapacitorHttp uses the OS network stack — bypasses CORS + WebView cleartext sandbox.
-// On web/dev: falls back to standard fetch.
-async function sonosPost(
-  url: string,
-  headers: Record<string, string>,
-  body: string,
-): Promise<void> {
-  if (Capacitor.isNativePlatform()) {
-    await CapacitorHttp.request({
-      method: "POST",
-      url,
-      headers,
-      data: body,
-      responseType: "text",
-    });
-  } else {
-    await fetch(url, {
-      method: "POST",
-      mode: "no-cors",
-      headers,
-      body,
-    });
-  }
-}
-
 async function sendCommand(
   ip: string,
   endpoint: string,
@@ -41,14 +14,15 @@ async function sendCommand(
   action: string,
   body: string,
 ): Promise<void> {
-  await sonosPost(
-    `http://${ip}:1400${endpoint}`,
-    {
+  await fetch(`http://${ip}:1400${endpoint}`, {
+    method: "POST",
+    mode: "no-cors",
+    headers: {
       "Content-Type": 'text/xml; charset="utf-8"',
       SOAPACTION: `"${serviceType}#${action}"`,
     },
-    soapEnvelope(serviceType, action, body),
-  );
+    body: soapEnvelope(serviceType, action, body),
+  });
 }
 
 export async function setMute(ip: string, mute: boolean): Promise<void> {
@@ -105,14 +79,15 @@ export async function setAVTransportURI(ip: string, uri: string, metadata = ""):
 }
 
 export async function executeLocalCommand(cmd: LocalCommand): Promise<void> {
-  await sonosPost(
-    cmd.url,
-    {
+  await fetch(cmd.url, {
+    method: "POST",
+    mode: "no-cors",
+    headers: {
       ...cmd.headers,
       "Content-Type": 'text/xml; charset="utf-8"',
     },
-    cmd.body,
-  );
+    body: cmd.body,
+  });
 }
 
 export type { LocalCommand };

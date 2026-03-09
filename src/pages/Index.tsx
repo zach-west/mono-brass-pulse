@@ -7,7 +7,7 @@ import { Search, Plus, Radio, FlaskConical } from "lucide-react";
 import { requestLocalNetworkAccess } from "@/services/permissions";
 import { REPLIT_API_URL, executeVibeChain } from "@/services/vibeApi";
 import { Capacitor } from "@capacitor/core";
-import { SpeechRecognition } from "@capacitor-community/speech-recognition";
+import { SpeechRecognition as CapSpeechRecognition } from "@capacitor-community/speech-recognition";
 
 interface Speaker {
   id: string;
@@ -67,13 +67,13 @@ const Index = () => {
     stateListenerRef.current?.remove();
     stateListenerRef.current = null;
     if (Capacitor.isNativePlatform()) {
-      try { await SpeechRecognition.stop(); } catch { /* already stopped */ }
+      try { await CapSpeechRecognition.stop(); } catch { /* already stopped */ }
     }
     setIsRecording(false);
   }, []);
 
   const startNativeRecording = useCallback(async () => {
-    const { speechRecognition } = await SpeechRecognition.requestPermissions();
+    const { speechRecognition } = await CapSpeechRecognition.requestPermissions();
     if (speechRecognition !== "granted") {
       toast({ title: "Microphone Access Denied", description: "Allow microphone in device settings.", variant: "destructive" });
       return;
@@ -83,9 +83,7 @@ const Index = () => {
     setIsRecording(true);
     addLog("LISTENING...");
 
-    // Fail-safe: if recognition stops without a result (timeout / error / silence),
-    // reset the UI so the user is never stuck in LISTENING mode.
-    stateListenerRef.current = await SpeechRecognition.addListener(
+    stateListenerRef.current = await CapSpeechRecognition.addListener(
       "listeningState",
       (data: { status: "started" | "stopped" }) => {
         if (data.status === "stopped" && !resultReceivedRef.current) {
@@ -97,7 +95,7 @@ const Index = () => {
       },
     );
 
-    listenerRef.current = await SpeechRecognition.addListener(
+    listenerRef.current = await CapSpeechRecognition.addListener(
       "partialResults",
       async (data: { matches: string[] }) => {
         const text = data.matches?.[0];
@@ -110,7 +108,7 @@ const Index = () => {
     );
 
     try {
-      await SpeechRecognition.start({
+      await CapSpeechRecognition.start({
         language: "en-US",
         maxResults: 1,
         partialResults: true,
@@ -123,11 +121,11 @@ const Index = () => {
   }, [addLog, stopRecording, runVibeFromText]);
 
   const startWebRecording = useCallback(() => {
-    const SpeechRecognitionAPI =
-      (window as unknown as Record<string, unknown>).SpeechRecognition as typeof SpeechRecognition ??
-      (window as unknown as Record<string, unknown>).webkitSpeechRecognition as typeof SpeechRecognition;
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition ??
+      (window as any).webkitSpeechRecognition;
 
-    if (!SpeechRecognitionAPI) {
+    if (!SpeechRecognitionCtor) {
       const fallback = window.prompt("Speak a vibe (type it here):");
       if (fallback?.trim()) {
         addLog(`INPUT → "${fallback.trim()}"`);
@@ -136,7 +134,7 @@ const Index = () => {
       return;
     }
 
-    const recognition = new (SpeechRecognitionAPI as unknown as new () => SpeechRecognition)();
+    const recognition = new SpeechRecognitionCtor();
     (recognition as unknown as { lang: string }).lang = "en-US";
     (recognition as unknown as { maxAlternatives: number }).maxAlternatives = 1;
 
