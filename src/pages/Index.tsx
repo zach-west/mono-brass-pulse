@@ -25,6 +25,7 @@ const Index = () => {
   const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTranscriptRef = useRef("");
+  const processedRef = useRef(false);
 
   const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toLocaleTimeString("en-US", {
@@ -89,37 +90,39 @@ const Index = () => {
     }
 
     setIsRecording(true);
+    processedRef.current = false;
+    lastTranscriptRef.current = "";
     addLog("LISTENING...");
 
-    // Timeout: if no result in 12 seconds, auto-reset UI (guards against silent hangs)
+    // Safety timeout — fires if recognition ends with no result at all
     recordingTimeoutRef.current = setTimeout(async () => {
       addLog("MIC TIMEOUT — no result after 12s, resetting");
       await stopRecording();
     }, 12000);
 
-    // partialResults: true — partial events fire for each word, which we debounce.
-    // With partialResults: false the plugin only calls onResults() (not onPartialResults()),
-    // so the "partialResults" listener NEVER fires and the UI hangs until the 12s timeout.
-    // The 1-second debounce collects the full sentence before processing it.
+    // partialResults: true — each word fires the event; we debounce on 500ms silence.
+    // processedRef prevents double-firing if both the debounce AND the post-start
+    // fallback trigger in the same session.
     listenerRef.current = await CapSpeechRecognition.addListener(
       "partialResults",
       (data: { matches: string[] }) => {
+        if (processedRef.current) return;
         const text = data.matches?.[0];
         if (!text) return;
 
-        // Accumulate the latest (longest) transcript
         lastTranscriptRef.current = text;
 
-        // Reset the silence timer on every new word
         if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = setTimeout(async () => {
           debounceTimerRef.current = null;
+          if (processedRef.current) return;
+          processedRef.current = true;
           const finalText = lastTranscriptRef.current;
           if (!finalText) return;
           await stopRecording();
           addLog(`TRANSCRIPTION → "${finalText}"`);
           await runVibeFromText(finalText);
-        }, 1000); // 1s of silence = sentence complete
+        }, 500); // 500ms silence = sentence complete
       },
     );
 
@@ -130,6 +133,21 @@ const Index = () => {
         partialResults: true,
         popup: false,
       });
+      // start() resolves when Android naturally ends the recognition session.
+      // If the debounce already processed the result, processedRef guards against double-run.
+      // If not (events fired but debounce hadn't fired yet, or no events at all), handle here.
+      if (!processedRef.current) {
+        processedRef.current = true;
+        const finalText = lastTranscriptRef.current;
+        if (finalText) {
+          await stopRecording();
+          addLog(`TRANSCRIPTION → "${finalText}"`);
+          await runVibeFromText(finalText);
+        } else {
+          addLog("MIC — recognition ended, no speech captured");
+          await stopRecording();
+        }
+      }
     } catch (err) {
       addLog(`MIC ERROR → ${String(err)}`);
       await stopRecording();
