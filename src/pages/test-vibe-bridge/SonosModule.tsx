@@ -7,7 +7,7 @@ import { Volume2, VolumeX, Wifi, WifiOff } from "lucide-react";
 import { classifyError, fetchViaLanProxy } from "./network";
 
 export function SonosModule() {
-  const [ip, setIp] = useState("192.168.1.50");
+  const [ip, setIp] = useState("192.168.88.3");
   const [status, setStatus] = useState<"idle" | "testing" | "connected" | "error">("idle");
   const [deviceInfo, setDeviceInfo] = useState<string | null>(null);
   const [muteState, setMuteState] = useState(1);
