@@ -180,6 +180,37 @@ function buildStopCmd(ip: string): LocalCommand {
   };
 }
 
+// Builds a Spotify LOAD command directly in the Face — bypasses Brain-generated SOAP.
+// Clones the exact DIDL-Lite structure observed from the native Sonos app via GetPositionInfo:
+//   - <res protocolInfo="sonos.com-spotify:*:audio/x-spotify:*"> (critical — was missing)
+//   - URL-encoded colons in track ID (spotify%3atrack%3a)
+//   - flags=8232 (observed from native transport)
+//   - <desc> with the exact SA_RINCON token from localStorage (sniffed from native app)
+function buildSpotifyLoadFromFace(
+  ip: string,
+  spotifyTrackId: string,
+  sn: number,
+  trackTitle: string,
+  descToken: string,
+): LocalCommand {
+  const AVT = "urn:schemas-upnp-org:service:AVTransport:1";
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // URI format cloned from native Sonos app transport capture
+  const trackUri = `x-sonos-spotify:spotify%3atrack%3a${spotifyTrackId}?sid=9&flags=8232&sn=${sn}`;
+
+  // DIDL-Lite cloned from native metadata — includes <res> with sonos.com-spotify protocolInfo
+  const didl = `<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"><item id="spotify:track:${spotifyTrackId}" parentID="-1" restricted="true"><res protocolInfo="sonos.com-spotify:*:audio/x-spotify:*">${esc(trackUri)}</res><dc:title>${esc(trackTitle)}</dc:title><upnp:class>object.item.audioItem.musicTrack</upnp:class><desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">${esc(descToken)}</desc></item></DIDL-Lite>`;
+
+  return {
+    url: `http://${ip}:1400/MediaRenderer/AVTransport/Control`,
+    headers: { "SOAPACTION": `"${AVT}#SetAVTransportURI"` },
+    body: `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:SetAVTransportURI xmlns:u="${AVT}"><InstanceID>0</InstanceID><CurrentURI>${esc(trackUri)}</CurrentURI><CurrentURIMetaData>${esc(didl)}</CurrentURIMetaData></u:SetAVTransportURI></s:Body></s:Envelope>`,
+    description: `Precision LOAD: spotify:track:${spotifyTrackId} sn=${sn}`,
+  };
+}
+
 // Builds the ListAvailableServices probe command.
 // MusicServices:1 service — returns all configured music services with their IDs.
 function buildListServicesCmd(ip: string): LocalCommand {
@@ -310,7 +341,7 @@ export async function probeTransportState(
       .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
 
     if (meta) {
-      tlog(`TRANSPORT → META (decoded): ${meta.replace(/\s+/g, " ").slice(0, 600)}`);
+      tlog(`TRANSPORT → META (decoded): ${meta.replace(/\s+/g, " ").slice(0, 3000)}`);
 
       // Extract every <desc> element — one of these holds the SA_RINCON token
       const descMatches = meta.matchAll(/<desc[^>]*>([\s\S]*?)<\/desc>/g);
@@ -407,44 +438,34 @@ export async function executeVibeChain(
     await executeLocalCommand(buildStopCmd(speakerIp), "STOP", logAndCollect);
     await sleep(300);
 
-    // Step 2: Load — try sn values in order; cached winner is tried first
-    // sn is the Sonos Spotify account serial assigned when Spotify was linked in the Sonos app
-    const cachedSn = localStorage.getItem("sonos_spotify_sn");
-    const snOrder = cachedSn
-      ? [Number(cachedSn), ...[1,2,3,4,5,6,7,8,9,10,11,12].filter((n) => n !== Number(cachedSn))]
-      : [1,2,3,4,5,6,7,8,9,10,11,12];
+    // Step 2: Precision LOAD — Face-built command using native DIDL clone
+    // Uses sn captured from live transport probe, desc token sniffed from native app.
+    // No blind retry — we have all values confirmed by the diagnostic probes.
+    const sn = Number(localStorage.getItem("sonos_spotify_sn") ?? "2");
+    const descToken = localStorage.getItem("sonos_spotify_desc_token") ?? "SA_RINCON2311_X_#Svc2311-0-Token";
 
-    let loadSuccess = false;
-    for (const sn of snOrder) {
-      // Patch LOAD body to match native Sonos app URI format exactly:
-      // 1. URL-encode spotify colons: spotify:track:ID → spotify%3atrack%3aID (from GetPositionInfo capture)
-      // 2. Use flags=8232 (native app value, not 8224)
-      const patchedBody = baseLoadCmd.body
+    // Extract Spotify track ID from the first track URI (spotify:track:ID)
+    const firstTrack = tracks[0];
+    const rawUri = firstTrack?.uri ?? "";
+    const spotifyTrackId = rawUri.replace(/^.*spotify:track:/, "").trim();
+    const trackTitle = firstTrack?.name ?? (firstTrack as unknown as Record<string, string>)?.title ?? "Unknown";
+
+    if (!spotifyTrackId) throw new Error("No Spotify track ID in curate response — check Brain");
+
+    const faceCmd = buildSpotifyLoadFromFace(speakerIp, spotifyTrackId, sn, trackTitle, descToken);
+    logAndCollect(`LOAD → sn=${sn} | desc=${descToken.slice(0, 60)} | track=${spotifyTrackId}`);
+
+    try {
+      await executeLocalCommand(faceCmd, "LOAD", logAndCollect);
+    } catch (loadErr) {
+      // Fallback: try with Brain-generated command in case Face build has an issue
+      logAndCollect(`FACE-LOAD failed (${String(loadErr).slice(0, 80)}) — trying Brain command as fallback`);
+      const fallbackBody = baseLoadCmd.body
         .replace(/sn=\d+/g, `sn=${sn}`)
         .replace(/x-sonos-spotify:spotify:track:/g, "x-sonos-spotify:spotify%3atrack%3a")
         .replace(/flags=8224/g, "flags=8232");
-
-      // Log the exact URI snippet being sent for verification
-      const uriSnippet = patchedBody.match(/x-sonos-spotify[^"<& ]*/)?.[0]?.slice(0, 140) ?? "(uri not found in body)";
-      logAndCollect(`  URI → ${uriSnippet}`);
-
-      const patchedLoad: LocalCommand = {
-        ...baseLoadCmd,
-        body: patchedBody,
-        description: `Load track (sn=${sn}, flags=8232)`,
-      };
-      try {
-        await executeLocalCommand(patchedLoad, "LOAD", logAndCollect);
-        localStorage.setItem("sonos_spotify_sn", String(sn));
-        loadSuccess = true;
-        break;
-      } catch {
-        logAndCollect(`  sn=${sn} rejected — trying next`);
-      }
-    }
-
-    if (!loadSuccess) {
-      throw new Error("Sonos rejected LOAD for sn=1..12 — check PROBE/TRANSPORT logs; Spotify may need re-linking in Sonos app");
+      const fallbackCmd: LocalCommand = { ...baseLoadCmd, body: fallbackBody, description: `Brain LOAD (sn=${sn})` };
+      await executeLocalCommand(fallbackCmd, "LOAD-FALLBACK", logAndCollect);
     }
 
     // Step 3: Play
