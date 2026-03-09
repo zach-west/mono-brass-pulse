@@ -103,17 +103,50 @@ const Index = () => {
       tracks.slice(0, 3).forEach((t: unknown) => {
         const track = t as Record<string, unknown>;
         addLog(`  ♪ ${track.name ?? track.title ?? "Unknown"} — URI: ${track.uri ?? "none"}`);
-        console.log("[TEST VIBE] Track:", track);
       });
 
-      if (data?.localCommand) {
-        addLog(`LOCAL COMMAND ✓ → url: ${data.localCommand.url}`);
-        console.log("[TEST VIBE] localCommand:", data.localCommand);
-        toast({ title: "✓ localCommand present", description: data.localCommand.url });
-      } else {
-        addLog("LOCAL COMMAND ✗ → not found in response");
-        console.warn("[TEST VIBE] No localCommand in response:", data);
-        toast({ title: "⚠ No localCommand", description: "Response arrived but localCommand missing — check Brain logs.", variant: "destructive" });
+      if (!data?.localCommand) {
+        addLog("LOCAL COMMAND ✗ → not in response, check Brain");
+        toast({ title: "⚠ No localCommand", description: "Check Brain logs.", variant: "destructive" });
+        return;
+      }
+
+      const cmd = data.localCommand as { url: string; headers: Record<string, string>; body: string };
+      addLog(`LOCAL COMMAND ✓ → ${cmd.url}`);
+      addLog(`  HEADERS: ${JSON.stringify(cmd.headers)}`);
+      addLog(`  BODY PREVIEW: ${String(cmd.body).slice(0, 80)}…`);
+      console.log("[TEST VIBE] localCommand:", cmd);
+
+      // Fire without no-cors so we can read status and body for debugging
+      addLog("FIRING SOAP → attempting direct fetch (debug mode)…");
+      try {
+        const sonosRes = await fetch(cmd.url, {
+          method: "POST",
+          headers: {
+            "Content-Type": 'text/xml; charset="utf-8"',
+            "SOAPACTION": cmd.headers?.["SOAPACTION"] ?? cmd.headers?.["soapaction"] ?? "",
+            ...cmd.headers,
+          },
+          body: cmd.body,
+        });
+        const sonosBody = await sonosRes.text();
+        addLog(`SONOS HTTP STATUS → ${sonosRes.status} ${sonosRes.statusText}`);
+        addLog(`SONOS RESPONSE → ${sonosBody.slice(0, 120)}`);
+        console.log("[TEST VIBE] Sonos status:", sonosRes.status, sonosRes.statusText);
+        console.log("[TEST VIBE] Sonos body:", sonosBody);
+        if (sonosRes.ok) {
+          toast({ title: "▶ Sonos accepted command", description: `HTTP ${sonosRes.status}` });
+        } else {
+          toast({ title: `Sonos rejected: ${sonosRes.status}`, description: sonosBody.slice(0, 100), variant: "destructive" });
+        }
+      } catch (sonosErr) {
+        const msg = String(sonosErr);
+        addLog(`SONOS FETCH ERROR → ${msg}`);
+        console.error("[TEST VIBE] Sonos fetch error:", sonosErr);
+        if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+          addLog("  → Likely CLEARTEXT BLOCKED or speaker unreachable on this network");
+        }
+        toast({ title: "Sonos Unreachable", description: msg, variant: "destructive" });
       }
     } catch (err) {
       addLog(`TEST VIBE ERROR → ${String(err)}`);
