@@ -209,30 +209,45 @@ export async function probeServices(
   try {
     const xml = await executeLocalCommandGetBody(buildListServicesCmd(ip), "PROBE", plog);
 
-    // Extract individual <Service> blocks from the response
-    const serviceBlocks = xml.match(/<Service>[\s\S]*?<\/Service>/g) ?? [];
-    plog(`PROBE → ${serviceBlocks.length} services configured on device`);
+    // The Sonos response wraps all services inside <AvailableServiceDescriptorList>
+    // as HTML-entity-encoded XML — must decode before parsing service blocks.
+    const rawDescriptor = xml.match(/<AvailableServiceDescriptorList>([\s\S]*?)<\/AvailableServiceDescriptorList>/)?.[1] ?? "";
+    const decoded = rawDescriptor
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'");
+
+    // Service attributes are on the tag (<Service Id="9" Name="Spotify" ...>)
+    // not in child elements — match the opening tag and full block
+    const serviceBlocks = decoded.match(/<Service[^/][\s\S]*?<\/Service>/g) ?? [];
+    plog(`PROBE → ${serviceBlocks.length} services on device`);
 
     serviceBlocks.forEach((block) => {
-      const name  = block.match(/<Name>([^<]+)<\/Name>/)?.[1]             ?? "?";
-      const id    = block.match(/<Id>([^<]+)<\/Id>/)?.[1]                 ?? "?";
-      const caps  = block.match(/<Capabilities>([^<]+)<\/Capabilities>/)?.[1] ?? "?";
-      const uri   = block.match(/<SecureUri>([^<]+)<\/SecureUri>/)?.[1]   ??
-                    block.match(/<Uri>([^<]+)<\/Uri>/)?.[1]                ?? "?";
+      const id    = block.match(/\bId="([^"]+)"/)?.[1]                       ?? "?";
+      const name  = block.match(/\bName="([^"]+)"/)?.[1]                     ?? "?";
+      const caps  = block.match(/\bCapabilities="([^"]+)"/)?.[1]             ?? "?";
+      const uri   = block.match(/\bSecureUri="([^"]+)"/)?.[1]               ??
+                    block.match(/\bUri="([^"]+)"/)?.[1]                      ?? "?";
 
       plog(`  SVC id=${id} name="${name}" caps=${caps}`);
 
-      // Flag any Spotify-looking service — check by name and common IDs
+      // Flag Spotify by name or known service IDs (varies by region/firmware)
       const isSpotify = name.toLowerCase().includes("spotify") ||
                         ["9", "3079", "65031", "2311"].includes(id);
       if (isSpotify) {
-        plog(`  *** SPOTIFY CANDIDATE: id=${id} name="${name}" uri=${uri} ***`);
-        // Cache for use in LOAD command
+        plog(`  *** SPOTIFY FOUND: id=${id} name="${name}" uri=${uri} ***`);
         localStorage.setItem("sonos_spotify_service_id", id);
       }
     });
 
-    // Drain full raw XML to Brain console — strip whitespace to keep it one log line
+    // If still 0 services, dump decoded content for manual inspection
+    if (serviceBlocks.length === 0) {
+      plog(`PROBE:DECODED_SNIPPET → ${decoded.slice(0, 400) || "(empty)"}`);
+    }
+
+    // Drain full raw XML to Brain console for offline analysis
     drainLog([`[PROBE:SERVICES_XML] ${xml.replace(/\s+/g, " ").slice(0, 4000)}`]);
   } catch (err) {
     plog(`PROBE FAILED → ${String(err)}`);
