@@ -107,7 +107,9 @@ export async function getCommand(
   return data.localCommand;
 }
 
-// Volume control: POST /api/sonos/control with action=volume
+// Volume control: POST /api/sonos/control with action=volume, then execute SOAP locally.
+// NOTE: The Brain returns { localCommand } which must be executed from the device —
+// the Brain is cloud-hosted and cannot reach the private LAN Sonos IP directly.
 export async function sendVolumeControl(speakerIp: string, volume: number): Promise<void> {
   const res = await fetch(`${REPLIT_API_URL}/api/sonos/control`, {
     method: "POST",
@@ -115,6 +117,10 @@ export async function sendVolumeControl(speakerIp: string, volume: number): Prom
     body: JSON.stringify({ action: "volume", sonosIp: speakerIp, volume: Math.max(0, Math.min(100, Math.round(volume))) }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json() as { localCommand?: LocalCommand };
+  if (data.localCommand) {
+    await executeLocalCommand(data.localCommand, "VOLUME", () => {});
+  }
 }
 
 // Full voice-to-music chain:
