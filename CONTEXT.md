@@ -9,3 +9,9 @@
 * **Live Updates**: Use 'npx capgo upload' from Replit for instant changes.
 * **New APKs**: Trigger "Build & Release" in the mono-android-build GitHub Actions tab.
 * **Note**: The local android/ folder is a 'Ghost Folder' and must be ignored.
+
+### 3. Plugin Registry (The Handshake)
+* **Status Bar**: @capacitor/status-bar (Native Support: Yes)
+* **Splash Screen**: @capacitor/splash-screen (Native Support: Yes)
+* **Capgo**: capacitor-updater (Native Support: Yes)
+* **Rule**: Any new Capacitor plugin added to package.json MUST be manually added to the Native Vault's package.json before the next APK build.
