@@ -285,22 +285,59 @@ export async function probeTransportState(
   try {
     const xml = await executeLocalCommandGetBody(buildGetPositionInfoCmd(ip), "TRANSPORT", tlog);
 
-    // TrackURI may be plain text or entity-encoded inside the envelope
-    const raw = xml.match(/<TrackURI>([^<]*)<\/TrackURI>/)?.[1] ?? "";
-    const uri = raw.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
-
-    tlog(`TRANSPORT → URI: ${uri.slice(0, 250) || "(empty)"}`);
+    // ── TrackURI ─────────────────────────────────────────────────────────────
+    const rawUri = xml.match(/<TrackURI>([^<]*)<\/TrackURI>/)?.[1] ?? "";
+    const uri = rawUri
+      .replace(/&amp;/g, "&").replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+    tlog(`TRANSPORT → URI: ${uri || "(empty)"}`);
 
     if (uri.includes("x-sonos-spotify")) {
       const snMatch = uri.match(/[?&]sn=(\d+)/);
       if (snMatch) {
-        const sn = snMatch[1];
-        tlog(`TRANSPORT → sn=${sn} captured from live transport — caching`);
-        localStorage.setItem("sonos_spotify_sn", sn);
+        tlog(`TRANSPORT → sn=${snMatch[1]} captured — caching`);
+        localStorage.setItem("sonos_spotify_sn", snMatch[1]);
       }
     }
 
-    drainLog([`[TRANSPORT:URI] ${uri}`]);
+    // ── TrackMetaData (entity-encoded DIDL-Lite) ─────────────────────────────
+    // The Sonos embeds the DIDL XML as an entity-encoded string inside the SOAP.
+    // Decode it to recover the raw DIDL, then extract the <desc> token —
+    // this is the exact SA_RINCON... identity token we need to clone.
+    const rawMeta = xml.match(/<TrackMetaData>([\s\S]*?)<\/TrackMetaData>/)?.[1] ?? "";
+    const meta = rawMeta
+      .replace(/&amp;/g, "&").replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+
+    if (meta) {
+      tlog(`TRANSPORT → META (decoded): ${meta.replace(/\s+/g, " ").slice(0, 600)}`);
+
+      // Extract every <desc> element — one of these holds the SA_RINCON token
+      const descMatches = meta.matchAll(/<desc[^>]*>([\s\S]*?)<\/desc>/g);
+      for (const m of descMatches) {
+        const token = m[1].trim();
+        tlog(`TRANSPORT → DESC TOKEN: "${token}"`);
+        // Cache the token so the LOAD command can use it directly
+        if (token.startsWith("SA_RINCON")) {
+          localStorage.setItem("sonos_spotify_desc_token", token);
+          tlog(`TRANSPORT → SA_RINCON token cached ✓`);
+        }
+      }
+
+      // Also search for r:description or any other namespace variant
+      const rDescMatches = meta.matchAll(/<r:description[^>]*>([\s\S]*?)<\/r:description>/g);
+      for (const m of rDescMatches) {
+        tlog(`TRANSPORT → r:DESCRIPTION: "${m[1].trim()}"`);
+      }
+    } else {
+      tlog("TRANSPORT → META: (empty or not present)");
+    }
+
+    // Drain full raw SOAP response to Brain console for offline inspection
+    drainLog([
+      `[TRANSPORT:URI] ${uri}`,
+      `[TRANSPORT:META] ${meta.replace(/\s+/g, " ").slice(0, 3000)}`,
+    ]);
   } catch (err) {
     tlog(`TRANSPORT PROBE FAILED → ${String(err)}`);
   }
