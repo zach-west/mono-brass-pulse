@@ -123,11 +123,11 @@ Cap      await SpeechRecognition.start({
   }, [addLog, stopRecording, runVibeFromText]);
 
   const startWebRecording = useCallback(() => {
-    const SpeechRecognitionAPI =
-      (window as unknown as Record<string, unknown>).SpeechRecognition as typeof SpeechRecognition ??
-      (window as unknown as Record<string, unknown>).webkitSpeechRecognition as typeof SpeechRecognition;
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition ??
+      (window as any).webkitSpeechRecognition;
 
-    if (!SpeechRecognitionAPI) {
+    if (!SpeechRecognitionCtor) {
       const fallback = window.prompt("Speak a vibe (type it here):");
       if (fallback?.trim()) {
         addLog(`INPUT → "${fallback.trim()}"`);
@@ -136,7 +136,7 @@ Cap      await SpeechRecognition.start({
       return;
     }
 
-    const recognition = new (SpeechRecognitionAPI as unknown as new () => SpeechRecognition)();
+    const recognition = new SpeechRecognitionCtor();
     (recognition as unknown as { lang: string }).lang = "en-US";
     (recognition as unknown as { maxAlternatives: number }).maxAlternatives = 1;
 
