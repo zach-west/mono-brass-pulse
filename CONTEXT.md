@@ -15,3 +15,9 @@
 * **Splash Screen**: @capacitor/splash-screen (Native Support: Yes)
 * **Capgo**: capacitor-updater (Native Support: Yes)
 * **Rule**: Any new Capacitor plugin added to package.json MUST be manually added to the Native Vault's package.json before the next APK build.
+
+### 4. Brain & Service Contract (The API Handshake)
+* **Core Service**: Managed in 'mono-core-service'.
+* **Connection Rule**: All UI data requests must go through the centralized Express API.
+* **Security**: No API keys or secrets (Spotify/Sonos) are allowed in the UI Workshop. They must stay in the Brain.
+* **Discovery**: The UI discovers the Brain via the 'VITE_API_URL' environment variable.
