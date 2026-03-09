@@ -3,8 +3,9 @@ import BrassButton from "@/components/BrassButton";
 import SystemConsole from "@/components/SystemConsole";
 import SpeakerCard from "@/components/SpeakerCard";
 import { toast } from "@/hooks/use-toast";
-import { Search, Plus, Radio } from "lucide-react";
+import { Search, Plus, Radio, FlaskConical } from "lucide-react";
 import { requestLocalNetworkAccess } from "@/services/permissions";
+import { REPLIT_API_URL } from "@/services/vibeApi";
 
 interface Speaker {
   id: string;
@@ -83,6 +84,46 @@ const Index = () => {
     }
   }, [addLog, speakers]);
 
+  const [testingVibe, setTestingVibe] = useState(false);
+
+  const testVibe = useCallback(async () => {
+    setTestingVibe(true);
+    addLog("TEST VIBE → POST /api/vibe {vibe: 'late night house'}");
+    try {
+      const res = await fetch(`${REPLIT_API_URL}/api/vibe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vibe: "late night house" }),
+      });
+      const data = await res.json();
+      console.log("[TEST VIBE] Full response:", data);
+
+      const tracks: unknown[] = data?.tracks ?? data?.results ?? (Array.isArray(data) ? data : []);
+      addLog(`TRACKS RECEIVED → ${tracks.length} result(s)`);
+      tracks.slice(0, 3).forEach((t: unknown) => {
+        const track = t as Record<string, unknown>;
+        addLog(`  ♪ ${track.name ?? track.title ?? "Unknown"} — URI: ${track.uri ?? "none"}`);
+        console.log("[TEST VIBE] Track:", track);
+      });
+
+      if (data?.localCommand) {
+        addLog(`LOCAL COMMAND ✓ → url: ${data.localCommand.url}`);
+        console.log("[TEST VIBE] localCommand:", data.localCommand);
+        toast({ title: "✓ localCommand present", description: data.localCommand.url });
+      } else {
+        addLog("LOCAL COMMAND ✗ → not found in response");
+        console.warn("[TEST VIBE] No localCommand in response:", data);
+        toast({ title: "⚠ No localCommand", description: "Response arrived but localCommand missing — check Brain logs.", variant: "destructive" });
+      }
+    } catch (err) {
+      addLog(`TEST VIBE ERROR → ${String(err)}`);
+      console.error("[TEST VIBE] Error:", err);
+      toast({ title: "Test Vibe Failed", description: String(err), variant: "destructive" });
+    } finally {
+      setTestingVibe(false);
+    }
+  }, [addLog]);
+
   const addManualSpeaker = useCallback(() => {
     const knownIp = "192.168.88.3";
     const existing = speakers.find((s) => s.ip === knownIp);
@@ -99,6 +140,16 @@ const Index = () => {
       </h1>
 
       <BrassButton onPress={handlePress} />
+
+      <button
+        onClick={testVibe}
+        disabled={testingVibe}
+        data-testid="button-test-vibe"
+        className="flex items-center gap-2 px-4 py-2 rounded-md border border-primary/40 text-xs text-primary tracking-widest uppercase hover:bg-primary/10 transition-colors disabled:opacity-50"
+      >
+        <FlaskConical className="w-3.5 h-3.5" />
+        {testingVibe ? "Testing…" : "Test Vibe"}
+      </button>
 
       <div className="w-full max-w-sm space-y-3">
         <div className="flex items-center justify-between">
