@@ -96,7 +96,13 @@ const Index = () => {
       "partialResults",
       async (data: { matches: string[] }) => {
         const text = data.matches?.[0];
-        if (!text) return;
+        if (!text) {
+          // Empty result — recognition ended with no usable transcription.
+          // Must still reset the UI or it hangs in LISTENING state.
+          await stopRecording();
+          addLog("MIC — no speech detected, resetting UI");
+          return;
+        }
         await stopRecording();
         addLog(`TRANSCRIPTION → "${text}"`);
         await runVibeFromText(text);
