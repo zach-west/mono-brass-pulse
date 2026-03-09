@@ -7,7 +7,7 @@ import { Search, Plus, Radio, FlaskConical } from "lucide-react";
 import { requestLocalNetworkAccess } from "@/services/permissions";
 import { REPLIT_API_URL, executeVibeChain } from "@/services/vibeApi";
 import { Capacitor } from "@capacitor/core";
-import { SpeechRecognition } from "@capacitor-community/speech-recognition";
+import { SpeechRecognition as CapSpeechRecognition } from "@capacitor-community/speech-recognition";
 
 interface Speaker {
   id: string;
