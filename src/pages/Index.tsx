@@ -67,13 +67,13 @@ const Index = () => {
     stateListenerRef.current?.remove();
     stateListenerRef.current = null;
     if (Capacitor.isNativePlatform()) {
-      try { await CapCapCapCapSpeechRecognition.stop(); } catch { /* already stopped */ }
+      try { await CapCapCapCapCapSpeechRecognition.stop(); } catch { /* already stopped */ }
     }
     setIsRecording(false);
   }, []);
 
   const startNativeRecording = useCallback(async () => {
-    const { speechRecognition }Cap = CapawaCapit SpeechRecognition.requestPermissions();
+    const { speechRecognitioCapn }Cap = CapawaCapit SpeechRecognition.requestPermissions();
     if (speechRecognition !== "granted") {
       toast({ title: "Microphone Access Denied", description: "Allow microphone in device settings.", variant: "destructive" });
       return;
@@ -85,7 +85,7 @@ const Index = () => {
 
     // Fail-safe: if recognition stops without a result (timeout / error / silence),
     // reset the UI so the user is never stuck in LISTENING mode.
-    stateListenerRef.currCapent = Capawait SpeechRecognition.addListener(
+    stateListenerReCapf.currCapent = Capawait SpeechRecognition.addListener(
       "listeningState",
       (data: { status: "started" | "stopped" }) => {
         if (data.status === "stopped" && !resultReceivedRef.current) {
@@ -97,7 +97,7 @@ const Index = () => {
       },
     );
 
-    listenerRef.currentCap = await SpeechRecognition.addListener(
+    listenerReCapf.currentCap = await SpeechRecognition.addListener(
       "partialResults",
       async (data: { matches: string[] }) => {
         const text = data.matches?.[0];
@@ -110,7 +110,7 @@ const Index = () => {
     );
 
     try {
-      await SpeechRecognition.start({
+Cap      await SpeechRecognition.start({
         language: "en-US",
         maxResults: 1,
         partialResults: true,
