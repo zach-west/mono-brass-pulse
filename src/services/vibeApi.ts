@@ -275,3 +275,6 @@ export async function getVibeMetadata(id: string): Promise<VibeTrack | null> {
     uri: t.uri ? String(t.uri) : undefined,
   };
 }
+
+// Alias for SpotifyModule compatibility
+export const curateVibe = getCurateCommand;
