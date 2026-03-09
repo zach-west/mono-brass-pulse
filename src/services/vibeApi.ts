@@ -130,7 +130,7 @@ export async function executeVibeChain(
   const chainLogs: string[] = [];
   const logAndCollect = (msg: string) => { chainLogs.push(msg); onLog(msg); };
 
-  onLog(`VIBE QUERY → "${query}"`);
+  logAndCollect(`VIBE QUERY → "${query}" | speaker: ${speakerIp}`);
 
   const res = await fetch(`${REPLIT_API_URL}/api/curate`, {
     method: "POST",
@@ -141,13 +141,13 @@ export async function executeVibeChain(
 
   const data = await res.json() as CurateResponse;
   const tracks = data.tracks ?? [];
-  onLog(`TRACKS → ${tracks.length} verified`);
+  logAndCollect(`TRACKS → ${tracks.length} verified`);
   tracks.slice(0, 2).forEach((t) => {
-    onLog(`  ♪ ${t.name} — ${t.uri ?? ""}`);
+    logAndCollect(`  ♪ ${t.name} — ${t.uri ?? ""}`);
   });
 
   if (data.fallback && tracks.length === 0) {
-    onLog(`FALLBACK → ${data.fallback.note}`);
+    logAndCollect(`FALLBACK → ${data.fallback.note}`);
   }
 
   const cmds = data.localCommands;
