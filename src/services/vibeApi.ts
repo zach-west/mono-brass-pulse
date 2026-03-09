@@ -2,6 +2,16 @@ import { Capacitor, CapacitorHttp } from "@capacitor/core";
 
 export const REPLIT_API_URL = import.meta.env.VITE_API_URL as string || "https://mono-vibe-maker.replit.app";
 
+// Fire-and-forget: ships device logs to the Brain console for remote debugging.
+// Visible in the Replit workspace under the Brain's console output.
+export function drainLog(entries: string[], session = "mono-apk"): void {
+  fetch(`${REPLIT_API_URL}/api/device-log`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entries, session }),
+  }).catch(() => { /* non-critical, never block UI on log drain */ });
+}
+
 export interface VibeTrack {
   name: string;
   artist: string;
@@ -111,11 +121,15 @@ export async function sendVolumeControl(speakerIp: string, volume: number): Prom
 // 1. POST /api/curate → gets track list + localCommands SOAP payloads
 // 2. Fire loadFirstTrack (or fallback playlist) directly to Sonos via native HTTP
 // 3. Fire play command to start playback via native HTTP
+// All log entries are drained to the Brain console for remote debugging.
 export async function executeVibeChain(
   query: string,
   speakerIp: string,
   onLog: (msg: string) => void,
 ): Promise<void> {
+  const chainLogs: string[] = [];
+  const logAndCollect = (msg: string) => { chainLogs.push(msg); onLog(msg); };
+
   onLog(`VIBE QUERY → "${query}"`);
 
   const res = await fetch(`${REPLIT_API_URL}/api/curate`, {
@@ -140,10 +154,13 @@ export async function executeVibeChain(
   if (!cmds) throw new Error("No localCommands in Brain response — check Brain logs");
 
   const loadCmd = cmds.loadFirstTrack ?? cmds.loadFallbackPlaylist;
-  await executeLocalCommand(loadCmd, "LOAD", onLog);
-  await executeLocalCommand(cmds.play, "PLAY", onLog);
-
-  onLog("PLAYBACK STARTED ✓");
+  try {
+    await executeLocalCommand(loadCmd, "LOAD", logAndCollect);
+    await executeLocalCommand(cmds.play, "PLAY", logAndCollect);
+    logAndCollect("PLAYBACK STARTED ✓");
+  } finally {
+    drainLog(chainLogs);
+  }
 }
 
 // Legacy helper (used by SpotifyModule / TestVibeBridge)
