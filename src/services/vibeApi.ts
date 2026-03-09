@@ -1,3 +1,5 @@
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
+
 export const REPLIT_API_URL = import.meta.env.VITE_API_URL as string || "https://mono-vibe-maker.replit.app";
 
 export interface VibeTrack {
@@ -32,6 +34,50 @@ export interface CurateResponse {
   searchBlocked: boolean;
 }
 
+// Native-aware SOAP/UPnP executor.
+// On Android: CapacitorHttp uses the OS network stack — bypasses CORS + WebView cleartext sandbox.
+// On web/dev: falls back to standard fetch (no sandbox restrictions in browser).
+async function executeLocalCommand(
+  cmd: LocalCommand,
+  label: string,
+  onLog: (msg: string) => void,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    ...cmd.headers,
+    "Content-Type": 'text/xml; charset="utf-8"',
+  };
+
+  onLog(`${label} → ${cmd.description ?? cmd.url}`);
+
+  if (Capacitor.isNativePlatform()) {
+    const response = await CapacitorHttp.request({
+      method: "POST",
+      url: cmd.url,
+      headers,
+      data: cmd.body,
+      responseType: "text",
+    });
+    const body = typeof response.data === "string" ? response.data : JSON.stringify(response.data);
+    onLog(`${label} ← HTTP ${response.status}`);
+    if (response.status < 200 || response.status >= 300) {
+      onLog(`${label} REJECTED → ${body.slice(0, 200)}`);
+      throw new Error(`Sonos rejected ${label}: HTTP ${response.status}`);
+    }
+  } else {
+    const res = await fetch(cmd.url, {
+      method: "POST",
+      headers,
+      body: cmd.body,
+    });
+    const body = await res.text();
+    onLog(`${label} ← HTTP ${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      onLog(`${label} REJECTED → ${body.slice(0, 200)}`);
+      throw new Error(`Sonos rejected ${label}: HTTP ${res.status}`);
+    }
+  }
+}
+
 // Transport controls: play, pause, mute, unmute
 // Brain endpoint: POST /api/sonos/control → returns { localCommand }
 export async function getCommand(
@@ -63,8 +109,8 @@ export async function sendVolumeControl(speakerIp: string, volume: number): Prom
 
 // Full voice-to-music chain:
 // 1. POST /api/curate → gets track list + localCommands SOAP payloads
-// 2. Fire loadFirstTrack (or fallback playlist) directly to Sonos
-// 3. Fire play command to start playback
+// 2. Fire loadFirstTrack (or fallback playlist) directly to Sonos via native HTTP
+// 3. Fire play command to start playback via native HTTP
 export async function executeVibeChain(
   query: string,
   speakerIp: string,
@@ -93,41 +139,9 @@ export async function executeVibeChain(
   const cmds = data.localCommands;
   if (!cmds) throw new Error("No localCommands in Brain response — check Brain logs");
 
-  // Step 1: Load track or fallback playlist
   const loadCmd = cmds.loadFirstTrack ?? cmds.loadFallbackPlaylist;
-  onLog(`LOADING → ${loadCmd.description ?? loadCmd.url}`);
-
-  const loadRes = await fetch(loadCmd.url, {
-    method: "POST",
-    headers: {
-      ...loadCmd.headers,
-      "Content-Type": 'text/xml; charset="utf-8"',
-    },
-    body: loadCmd.body,
-  });
-  const loadBody = await loadRes.text();
-  onLog(`SONOS LOAD → HTTP ${loadRes.status} ${loadRes.statusText}`);
-  if (!loadRes.ok) {
-    onLog(`SONOS LOAD ERROR → ${loadBody.slice(0, 200)}`);
-    throw new Error(`Sonos load rejected: HTTP ${loadRes.status}`);
-  }
-
-  // Step 2: Fire play command to start playback
-  onLog(`PLAYING → ${cmds.play.url}`);
-  const playRes = await fetch(cmds.play.url, {
-    method: "POST",
-    headers: {
-      ...cmds.play.headers,
-      "Content-Type": 'text/xml; charset="utf-8"',
-    },
-    body: cmds.play.body,
-  });
-  const playBody = await playRes.text();
-  onLog(`SONOS PLAY → HTTP ${playRes.status} ${playRes.statusText}`);
-  if (!playRes.ok) {
-    onLog(`SONOS PLAY ERROR → ${playBody.slice(0, 200)}`);
-    throw new Error(`Sonos play rejected: HTTP ${playRes.status}`);
-  }
+  await executeLocalCommand(loadCmd, "LOAD", onLog);
+  await executeLocalCommand(cmds.play, "PLAY", onLog);
 
   onLog("PLAYBACK STARTED ✓");
 }
