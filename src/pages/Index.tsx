@@ -67,7 +67,7 @@ const Index = () => {
     stateListenerRef.current?.remove();
     stateListenerRef.current = null;
     if (Capacitor.isNativePlatform()) {
-      try { await SpeechRecognition.stop(); } catch { /* already stopped */ }
+      try { await CapSpeechRecognition.stop(); } catch { /* already stopped */ }
     }
     setIsRecording(false);
   }, []);
