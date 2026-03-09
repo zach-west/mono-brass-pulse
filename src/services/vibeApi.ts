@@ -379,10 +379,22 @@ export async function executeVibeChain(
 
     let loadSuccess = false;
     for (const sn of snOrder) {
+      // Patch LOAD body to match native Sonos app URI format exactly:
+      // 1. URL-encode spotify colons: spotify:track:ID → spotify%3atrack%3aID (from GetPositionInfo capture)
+      // 2. Use flags=8232 (native app value, not 8224)
+      const patchedBody = baseLoadCmd.body
+        .replace(/sn=\d+/g, `sn=${sn}`)
+        .replace(/x-sonos-spotify:spotify:track:/g, "x-sonos-spotify:spotify%3atrack%3a")
+        .replace(/flags=8224/g, "flags=8232");
+
+      // Log the exact URI snippet being sent for verification
+      const uriSnippet = patchedBody.match(/x-sonos-spotify[^"<& ]*/)?.[0]?.slice(0, 140) ?? "(uri not found in body)";
+      logAndCollect(`  URI → ${uriSnippet}`);
+
       const patchedLoad: LocalCommand = {
         ...baseLoadCmd,
-        body: baseLoadCmd.body.replace(/sn=\d+/g, `sn=${sn}`),
-        description: `Load track (sn=${sn})`,
+        body: patchedBody,
+        description: `Load track (sn=${sn}, flags=8232)`,
       };
       try {
         await executeLocalCommand(patchedLoad, "LOAD", logAndCollect);
