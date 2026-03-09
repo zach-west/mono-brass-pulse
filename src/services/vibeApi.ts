@@ -1,4 +1,4 @@
-export const REPLIT_API_URL = "https://mono-vibe-maker.replit.app";
+export const REPLIT_API_URL = import.meta.env.VITE_API_URL as string || "https://mono-vibe-maker.replit.app";
 
 export interface VibeTrack {
   name: string;
