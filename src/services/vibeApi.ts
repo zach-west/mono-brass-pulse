@@ -60,7 +60,7 @@ async function executeLocalCommand(
     const body = typeof response.data === "string" ? response.data : JSON.stringify(response.data);
     onLog(`${label} ← HTTP ${response.status}`);
     if (response.status < 200 || response.status >= 300) {
-      onLog(`${label} REJECTED → ${body.slice(0, 200)}`);
+      onLog(`${label} REJECTED → ${body.slice(0, 500)}`);
       throw new Error(`Sonos rejected ${label}: HTTP ${response.status}`);
     }
   } else {
@@ -72,7 +72,7 @@ async function executeLocalCommand(
     const body = await res.text();
     onLog(`${label} ← HTTP ${res.status} ${res.statusText}`);
     if (!res.ok) {
-      onLog(`${label} REJECTED → ${body.slice(0, 200)}`);
+      onLog(`${label} REJECTED → ${body.slice(0, 500)}`);
       throw new Error(`Sonos rejected ${label}: HTTP ${res.status}`);
     }
   }
