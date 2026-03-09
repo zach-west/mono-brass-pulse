@@ -46,6 +46,68 @@ export async function curateVibe(
   return res.json() as Promise<LocalCommand>;
 }
 
+export async function sendVolumeControl(speakerIp: string, volume: number): Promise<void> {
+  const res = await fetch(`${REPLIT_API_URL}/api/sonos/control`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ speakerIp, action: "volume", value: Math.max(0, Math.min(100, Math.round(volume))) }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+export async function executeVibeChain(
+  query: string,
+  speakerIp: string,
+  onLog: (msg: string) => void,
+): Promise<void> {
+  onLog(`VIBE QUERY → "${query}"`);
+  const res = await fetch(`${REPLIT_API_URL}/api/vibe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vibe: query, speakerIp }),
+  });
+  if (!res.ok) throw new Error(`Brain returned HTTP ${res.status}`);
+
+  const data = await res.json();
+  const tracks: unknown[] = data?.tracks ?? data?.results ?? [];
+  onLog(`TRACKS → ${tracks.length} result(s)`);
+  (tracks as Array<Record<string, unknown>>).slice(0, 2).forEach((t) => {
+    onLog(`  ♪ ${String(t.name ?? t.title ?? "Unknown")} — ${String(t.uri ?? "")}`);
+  });
+
+  if (!data?.localCommand) {
+    throw new Error("No localCommand in Brain response — check Brain logs");
+  }
+
+  const cmd = data.localCommand as LocalCommand;
+  onLog(`SENDING → ${cmd.url}`);
+
+  try {
+    const sonosRes = await fetch(cmd.url, {
+      method: "POST",
+      headers: {
+        ...cmd.headers,
+        "Content-Type": 'text/xml; charset="utf-8"',
+      },
+      body: cmd.body,
+    });
+    const sonosBody = await sonosRes.text();
+    onLog(`SONOS HTTP STATUS → ${sonosRes.status} ${sonosRes.statusText}`);
+    if (!sonosRes.ok) {
+      onLog(`SONOS ERROR → ${sonosBody.slice(0, 200)}`);
+      throw new Error(`Sonos rejected: HTTP ${sonosRes.status}`);
+    }
+    onLog("PLAYBACK STARTED ✓");
+  } catch (fetchErr) {
+    const msg = String(fetchErr);
+    onLog(`SONOS FETCH ERROR → ${msg}`);
+    if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+      onLog("  → CLEARTEXT BLOCKED — APK needs android:usesCleartextTraffic=\"true\"");
+    }
+    throw fetchErr;
+  }
+}
+
 export async function searchVibes(query: string): Promise<VibeTrack[]> {
   const res = await fetch(
     `${REPLIT_API_URL}/api/search?q=${encodeURIComponent(query)}`,
