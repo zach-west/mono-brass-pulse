@@ -1,3 +1,5 @@
+import type { LocalCommand } from "./vibeApi";
+
 const RENDERING_CONTROL = "urn:schemas-upnp-org:service:RenderingControl:1";
 const AV_TRANSPORT = "urn:schemas-upnp-org:service:AVTransport:1";
 
@@ -16,7 +18,7 @@ async function sendCommand(
     method: "POST",
     mode: "no-cors",
     headers: {
-      "Content-Type": "text/xml; charset=utf-8",
+      "Content-Type": 'text/xml; charset="utf-8"',
       SOAPACTION: `"${serviceType}#${action}"`,
     },
     body: soapEnvelope(serviceType, action, body),
@@ -76,17 +78,16 @@ export async function setAVTransportURI(ip: string, uri: string, metadata = ""):
   );
 }
 
-export interface LocalCommand {
-  url: string;
-  headers: Record<string, string>;
-  body: string;
-}
-
 export async function executeLocalCommand(cmd: LocalCommand): Promise<void> {
   await fetch(cmd.url, {
     method: "POST",
     mode: "no-cors",
-    headers: cmd.headers,
+    headers: {
+      ...cmd.headers,
+      "Content-Type": 'text/xml; charset="utf-8"',
+    },
     body: cmd.body,
   });
 }
+
+export type { LocalCommand };
