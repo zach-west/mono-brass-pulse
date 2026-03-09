@@ -4,7 +4,7 @@ import { Slider } from "@/components/ui/slider";
 import { toast } from "@/hooks/use-toast";
 import { Volume2, VolumeX, Wifi, Play, Pause } from "lucide-react";
 import * as sonos from "@/services/sonosControl";
-import { getCommand } from "@/services/vibeApi";
+import { getCommand, sendVolumeControl } from "@/services/vibeApi";
 
 interface SpeakerCardProps {
   name: string;
@@ -25,11 +25,14 @@ const SpeakerCard = ({ name, ip, onLog }: SpeakerCardProps) => {
         await fn();
         onSuccess?.();
         onLog(`[${label}] OK → ${ip}`);
-      } catch {
-        onLog(`[ERROR] ${label} failed → ${ip}`);
+      } catch (err) {
+        const msg = String(err);
+        onLog(`[ERROR] ${label} failed → ${msg}`);
         toast({
           title: "Command Failed",
-          description: "Check WiFi permissions — ensure you're on the same network as the speaker.",
+          description: msg.includes("Failed to fetch")
+            ? "Speaker unreachable — check WiFi and cleartext config"
+            : msg,
           variant: "destructive",
         });
       } finally {
@@ -41,17 +44,16 @@ const SpeakerCard = ({ name, ip, onLog }: SpeakerCardProps) => {
 
   return (
     <div className="console-border rounded-lg p-4 space-y-3">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
             <Volume2 className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <p className="text-sm font-medium text-foreground tracking-wide">{name}</p>
+            <p className="text-sm font-medium text-foreground tracking-wide" data-testid={`text-speaker-name-${ip}`}>{name}</p>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Wifi className="w-3 h-3" />
-              <span>{ip}</span>
+              <span data-testid={`text-speaker-ip-${ip}`}>{ip}</span>
             </div>
           </div>
         </div>
@@ -63,13 +65,14 @@ const SpeakerCard = ({ name, ip, onLog }: SpeakerCardProps) => {
           )}
           <Switch
             checked={muted}
+            data-testid={`switch-mute-${ip}`}
             onCheckedChange={(checked) =>
               exec(checked ? "MUTE" : "UNMUTE", async () => {
                 const cmd = await getCommand(checked ? "mute" : "unmute", ip);
                 await sonos.executeLocalCommand(cmd);
               }, () => {
                 setMuted(checked);
-                toast({ title: checked ? "🔇 Muted" : "🔊 Unmuted", description: `Command sent to ${name}` });
+                toast({ title: checked ? "Muted" : "Unmuted", description: `Command sent to ${name}` });
               })
             }
             disabled={loading}
@@ -78,9 +81,9 @@ const SpeakerCard = ({ name, ip, onLog }: SpeakerCardProps) => {
         </div>
       </div>
 
-      {/* Transport Controls */}
       <div className="flex items-center gap-2">
         <button
+          data-testid={`button-transport-${ip}`}
           onClick={() =>
             exec(
               playing ? "PAUSE" : "PLAY",
@@ -98,7 +101,6 @@ const SpeakerCard = ({ name, ip, onLog }: SpeakerCardProps) => {
           {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
         </button>
 
-        {/* Volume Slider */}
         <div className="flex-1 flex items-center gap-2">
           <Volume2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <Slider
@@ -106,15 +108,16 @@ const SpeakerCard = ({ name, ip, onLog }: SpeakerCardProps) => {
             min={0}
             max={100}
             step={1}
+            data-testid={`slider-volume-${ip}`}
             onValueCommit={(val) => {
               const v = val[0];
-              exec("VOLUME", () => sonos.setVolume(ip, v), () => setVolume(v));
+              exec("VOLUME", () => sendVolumeControl(ip, v), () => setVolume(v));
             }}
             onValueChange={(val) => setVolume(val[0])}
             disabled={loading}
             className="flex-1"
           />
-          <span className="text-xs text-muted-foreground w-7 text-right font-mono">{volume}</span>
+          <span className="text-xs text-muted-foreground w-7 text-right font-mono" data-testid={`text-volume-${ip}`}>{volume}</span>
         </div>
       </div>
     </div>
