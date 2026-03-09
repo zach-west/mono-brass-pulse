@@ -14,7 +14,19 @@
 * **Status Bar**: @capacitor/status-bar (Native Support: Yes)
 * **Splash Screen**: @capacitor/splash-screen (Native Support: Yes)
 * **Capgo**: capacitor-updater (Native Support: Yes)
+* **Speech Recognition**: @capacitor-community/speech-recognition (Native Support: **SYNCED** — in mono-android-build package.json + RECORD_AUDIO permission in manifest)
 * **Rule**: Any new Capacitor plugin added to package.json MUST be manually added to the Native Vault's package.json before the next APK build.
+
+### 5. v1.0.2 — Full System Ignition
+* **Brass Button**: Now triggers voice recording (Capacitor native) → Web Speech API fallback
+* **Voice Chain**: Transcription → POST /api/vibe → executes localCommand SOAP directly to Sonos
+* **Volume**: SpeakerCard slider POSTs to /api/sonos/control (Brain-routed)
+* **Transport (Play/Pause/Mute)**: Uses Brain's /api/command → executeLocalCommand with proper SOAP headers
+* **SOAP Headers**: Content-Type enforced as `text/xml; charset="utf-8"` (quoted charset per Sonos spec)
+* **Cleartext Fix (Android)**: Verify in mono-android-build:
+  - `android/app/src/main/AndroidManifest.xml`: `android:usesCleartextTraffic="true"` and `android:networkSecurityConfig="@xml/network_security_config"`
+  - `android/app/src/main/res/xml/network_security_config.xml`: domain-config for 192.168.88.3
+  - Reference patch: `.local/android-vault-patch/` in this repo
 
 ### 4. Brain & Service Contract (The API Handshake)
 * **Core Service**: Managed in 'mono-core-service'.
