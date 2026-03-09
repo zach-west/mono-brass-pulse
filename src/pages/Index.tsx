@@ -22,8 +22,7 @@ const Index = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [testingVibe, setTestingVibe] = useState(false);
   const listenerRef = useRef<{ remove: () => void } | null>(null);
-  const stateListenerRef = useRef<{ remove: () => void } | null>(null);
-  const resultReceivedRef = useRef(false);
+  const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const addLog = useCallback((msg: string) => {
     const timestamp = new Date().toLocaleTimeString("en-US", {
@@ -38,7 +37,7 @@ const Index = () => {
   useEffect(() => {
     return () => {
       listenerRef.current?.remove();
-      stateListenerRef.current?.remove();
+      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
     };
   }, []);
 
@@ -62,10 +61,12 @@ const Index = () => {
   );
 
   const stopRecording = useCallback(async () => {
+    if (recordingTimeoutRef.current) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
     listenerRef.current?.remove();
     listenerRef.current = null;
-    stateListenerRef.current?.remove();
-    stateListenerRef.current = null;
     if (Capacitor.isNativePlatform()) {
       try { await CapSpeechRecognition.stop(); } catch { /* already stopped */ }
     }
@@ -79,28 +80,23 @@ const Index = () => {
       return;
     }
 
-    resultReceivedRef.current = false;
     setIsRecording(true);
     addLog("LISTENING...");
 
-    stateListenerRef.current = await CapSpeechRecognition.addListener(
-      "listeningState",
-      (data: { status: "started" | "stopped" }) => {
-        if (data.status === "stopped" && !resultReceivedRef.current) {
-          addLog("MIC STOPPED — no result, resetting UI");
-          setIsRecording(false);
-          stateListenerRef.current?.remove();
-          stateListenerRef.current = null;
-        }
-      },
-    );
+    // Timeout: if no result in 12 seconds, auto-reset UI (guards against silent hangs)
+    recordingTimeoutRef.current = setTimeout(async () => {
+      addLog("MIC TIMEOUT — no result after 12s, resetting");
+      await stopRecording();
+    }, 12000);
 
+    // partialResults: false → wait for complete utterance before firing
+    // (partialResults: true causes the first partial word to trigger immediately,
+    // cutting the user off mid-sentence)
     listenerRef.current = await CapSpeechRecognition.addListener(
       "partialResults",
       async (data: { matches: string[] }) => {
         const text = data.matches?.[0];
         if (!text) return;
-        resultReceivedRef.current = true;
         await stopRecording();
         addLog(`TRANSCRIPTION → "${text}"`);
         await runVibeFromText(text);
@@ -111,7 +107,7 @@ const Index = () => {
       await CapSpeechRecognition.start({
         language: "en-US",
         maxResults: 1,
-        partialResults: true,
+        partialResults: false,
         popup: false,
       });
     } catch (err) {
